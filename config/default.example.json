@@ -1,0 +1,40 @@
+{
+	"browser":{
+		"useragent": "'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_11_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/50.0.2661.102 Safari/537.36'"
+	},
+	"simulator":{
+		"baseurl": "http://simplify.itiv.kit.edu/tivseg-sim",
+		"login": {
+			"kurs": "Mi1400A02",
+			"passwort": "abc.123-de"
+		},
+		"prepare": [
+			"check",
+			"projects",
+			"check",
+			"current-step",
+			"check",
+			"2",
+			"check",
+			"current-step",
+			"check",
+			"current-step",
+			"check",
+			"components",
+			"check",
+			"current-step",
+			"check",
+			"components-arch",
+			"check",
+			"current-step",
+			"check",
+			"current-step",
+			"check",
+			"current-step",
+			"check"
+		]
+	},
+	"code": {
+		"basepath": "/Users/moritz/dev/projects/uni/IT/workshop/"
+	}
+}

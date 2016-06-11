@@ -2,13 +2,25 @@
   "name": "sim",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "simulate.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node simulate.js"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "config": "^1.21.0",
+    "curlrequest": "^0.5.7",
+    "html2json": "^1.0.2",
+    "multipart-stream": "^2.0.1",
+    "node-libcurl": "^1.0.0",
     "request": "^2.72.0"
+  },
+  "devDependencies": {
+    "eslint": "^2.12.0",
+    "eslint-config-airbnb": "^9.0.1",
+    "eslint-plugin-import": "^1.8.1",
+    "eslint-plugin-node": "^1.4.0",
+    "request-debug": "^0.2.0"
   }
 }
