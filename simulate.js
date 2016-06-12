@@ -8,10 +8,13 @@ const config = require('config');
 const html2json = require('html2json').html2json;
 const curl = require('curlrequest');
 
+// require('request-debug')(Request);
+
 const browser = config.get('browser');
 const simulator = config.get('simulator');
 
 let sessionCookie = '';
+let fileMap = '';
 
 // request with curl, server returns incomplete headers
 const requestC = curl.request({
@@ -85,15 +88,15 @@ function testHomepage() {
 	});
 }
 
-function uploadFile(filePath) {
+function uploadFile(file) {
 	return new Promise((resolve, reject) => {
 		const stream = new MultipartStream();
 		stream.addPart({
 			headers: {
-				'Content-Disposition': `form-data; name="userfile"; filename="${path.basename(filePath)}"`,
+				'Content-Disposition': `form-data; name="userfile"; filename="${file.name}"`,
 				'Content-Type': 'application/octet-stream',
 			},
-			body: fs.createReadStream(filePath)
+			body: fs.createReadStream(file.path)
 		});
 		let data;
 		stream.on('data', (d) => {
@@ -113,18 +116,18 @@ function uploadFile(filePath) {
 				},
 				'data-binary': data,
 				compressed: 'true',
-			}, (error, body, meta) => {
-				// console.log('%s %s', meta.cmd, meta.args.join(' '));
-				if (error) {
-					reject(error);
+			}, (error, body) => {
+				// check if error, curl gives us a strange error message anyway \dirty
+				if (error && error !== "Couldn't resolve host. The given remote host was not resolved.") {
+					return reject(error);
 				}
+
+				// parse response
 				body = JSON.parse(body);
-				console.log(body);
-				if ((body[error] != null)){
-					resolve(body);
-				} else {
-					reject(body[error]);
+				if (body.error === null) {
+					return resolve(body);
 				}
+				return reject(body.error);
 			});
 		});
 	});
@@ -143,115 +146,229 @@ function getFileMap() {
 			if (error) {
 				reject();
 			} else {
+				// only get first part of response, body does not conform to HTML standart after script tag
+				// \WTF
 				const toParse = body.split('<script type="text/javascript">')[0];
+
+				// parse html to json
 				let json = html2json(toParse);
+
+				// get object we want (html2json is strange)
 				json = json.child[1].child[1].child[3].child[3].child[1].child;
-				const obj = {}; // output object
+
+				// prototype for output object
+				const obj = {};
+
+				// loop over objects
 				json.forEach((element) => {
+					// only get interesting objects and parse them
 					if (element.hasOwnProperty('child')) {
 						element.child.forEach((elementChild) => {
 							if (elementChild.node === 'element' && elementChild.attr.class === 'files_hidden_id') {
-								/* obj.push({
-									file: elementChild.attr.id,
-									id: elementChild.attr.value,
-								});*/
 								obj[elementChild.attr.id] = parseInt(elementChild.attr.value, 10);
 							}
 						});
 					}
 				});
+
+				// looks like this: {fileName: fileId, ...}
 				resolve(obj);
 			}
 		});
 	});
 }
 
-function prepare(object, index, done) {
-	// console.log(`${index}:${simulator.prepare[index]}`);
-	process.stdout.write('.'); // console.log with no \n
-	requestC({
-		url: `${simulator.baseurl}/${object[index]}?_=${Date.now()}`,
-		method: 'GET',
-		headers: {
-			Accept: 'text/plain, */*; q=0.01',
-			Cookie: sessionCookie
-		}
-	}, (error) => {
-		if (error) {
-			console.error(error);
-			return false;
-		}
-		if (index === (object.length - 1)) {
-			console.log('.');
-			return done();
-		}
-		return prepare(object, index + 1, done);
+function prepare(url) {
+	return new Promise((resolve, reject) => {
+		process.stdout.write('.'); // console.log with no \n
+		requestC({
+			url: `${simulator.baseurl}/${url}?_=${Date.now()}`,
+			method: 'GET',
+			headers: {
+				Accept: 'text/plain, */*; q=0.01',
+				Cookie: sessionCookie
+			}
+		}, (error) => {
+			if (error) {
+				reject(error);
+			} else {
+				resolve();
+			}
+		});
 	});
 }
 
-function moveFile(fileId, filename, tmpfile) {
-	console.log('move');
+function urlencodeObj(obj) {
+	obj.forEach((element, index, array) => {
+		const out = [];
+		for (const key in element) {
+			if (element.hasOwnProperty(key)) {
+				out.push(`toMove[${index}][${encodeURIComponent(key)}]=${encodeURIComponent(element[key])}`);
+			}
+		}
+		array[index] = out.join('&');
+	});
+
+	return obj.length > 1 ? obj.join('&') : obj[0];
+}
+
+function moveFile(obj) {
 	return new Promise((resolve, reject) => {
-		console.log('move');
-		const toMove = [];
-		toMove[0].fileId = fileId;
-		toMove[0].tmpfile = tmpfile;
-		toMove[0].name = filename;
-		request({
+		const toMoveUrlEncoded = urlencodeObj(obj);
+		requestC({
 			url: `${simulator.baseurl}/movefiles?_=${Date.now()}`,
 			method: 'POST',
 			headers: {
 				Accept: 'application/json, text/javascript, */*; q=0.01',
 				Cookie: sessionCookie
-			}
-		}, (error, response, body) => {
+			},
+			compressed: true,
+			data: toMoveUrlEncoded,
+		}, (error, body, meta) => {
 			if (error) {
 				console.error(error);
-				reject(error);
+				return reject(error);
 			}
-			console.log(body);
-			resolve();
+
+			body = JSON.parse(body);
+			if (body.error) {
+				console.error(body.error);
+				return reject(body.error);
+			}
+			return resolve();
 		});
 	});
 }
 
+function compile() {
+	return new Promise((resolve, reject) => {
+		request({
+			url: `${simulator.baseurl}/compile?_=${Date.now()}`,
+			method: 'GET',
+			headers: {
+				Accept: 'text/plain, */*; q=0.01',
+				Cookie: sessionCookie
+			}
+		}, (error, response, body) => {
+			if (error){
+				console.error(error);
+				reject(error);
+			} else {
+				body = html2json(body);
+				let out = [];
+				body.child.forEach((child) => {
+					if (child.tag === 'script') {
+						out.push(child.child);
+					}
+				});
+				const out1 = [];
+				out1.push(out[2][0].text);
+				out1.push(out[3][0].text);
+				return resolve(out1);
+			}
+		});
+	});
+}
+
+// fileId, filename, tmpfile -> fileMap[body.file.filename], body.file.filename, body.file.tmpfile
 // toMove[0][fileId]=941&toMove[0][tmpfile]=~tmp_96a57111a1af57da16784391fb6c62e0&toMove[0][name]=Motor.cpp
 // {"error":null,"files":[],"file":{"tmpfile":"~tmp_9f410c19d62be11029ef19ed1360f0b9","filename":"PWM.h"}}
-function uploadFiles(fileMap) {
-	uploadFile(`${__dirname}/Motor.cpp`)
-	.then((body) => {
-		console.log(body);
-		console.log('asdf');
-		return moveFile(fileMap[body.file.filename], body.file.filename, body.file.tmpfile);
-	}, (error) => {
-		console.log(error);
-	})
-	.then(() => {
-		process.stdout.write('preparing compiler');
-		prepare(simulator.prepare.compile, 0, () => {
-			console.log('done');
-		});
-	});
-}
 
-// do stuff
+/* magic starts here */
+// login with credentials from config file
 login()
 .then((sessioncookie) => {
+	// got session cookie, log it to the console
 	sessionCookie = sessioncookie;
 	console.log(`got session: ${sessionCookie}`);
+	// request the homepage to test if we are logged in successfully
 	return testHomepage();
 })
 .then(() => {
 	console.log('login successful');
 	process.stdout.write('preparing simulator');
-	return prepare(simulator.prepare.upload, 0, () => {
-		getFileMap()
-		.then((obj) => {
-			console.log(obj);
-			uploadFiles(obj);
+
+	// create array of promises we need
+	const promises = [];
+
+	// add promise for each prepare upload url
+	simulator.prepare.upload.forEach((url) => {
+		promises.push(prepare(url));
+	});
+
+	// resolve all promises before continuing
+	return Promise.all(promises);
+}, () => {
+	console.error('login failed!');
+})
+.then(() => { // wtf eslint
+	console.log('\ngetting file map');
+	return getFileMap();
+})
+.then((fileMap_) => {
+	// hacky workaround, so we can pass it through the next promise
+	fileMap = fileMap_;
+	// console.log(fileMap);
+
+	// create promises for the files we need to upload
+	const promises = [];
+
+	// iterate ofer all files given in settings.simulator.filesToUpload
+	simulator.filesToUpload.files.forEach((file_) => {
+		const file = {};
+		// generate full path to file
+		file.path = path.join(simulator.filesToUpload.basedir, file_);
+		// extract filename
+		file.name = path.basename(file.path);
+		// check if file is allowed / has destination ID
+		if (fileMap.hasOwnProperty(file.name)) {
+			promises.push(uploadFile(file));
+		}
+	});
+	// console.log(promises);
+	// upload all files, then resolve
+	return Promise.all(promises);
+})
+.then((obj) => {
+	// files are uploaded, let's move them
+	// prepare file moving array
+	const toMove = [];
+	obj.forEach((elem) => {
+		toMove.push({
+			fileId: fileMap[elem.file.filename],
+			tmpfile: elem.file.tmpfile,
+			name: elem.file.filename,
 		});
 	});
+	return moveFile(toMove);
+}, (error) => {
+	console.error(`move error: ${error}`);
 })
-.then((body) => {
-	console.log(body);
+.then(() => {
+	console.log('upload finished');
+}, (error) => {
+	console.error(error);
+})
+.then(() => {
+	console.log('files moved successfully');
+	process.stdout.write('preparing compiler');
+
+	// create array of promises we need
+	const promises = [];
+
+	// add promise for each prepare compile url
+	simulator.prepare.compile.forEach((url) => {
+		promises.push(prepare(url));
+	});
+
+	// resolve all promises before continuing
+	return Promise.all(promises);
+})
+.then(() => {
+	console.log('\ncompiling');
+	return compile();
+})
+.then((eval_) => {
+	eval(eval_[0]);
+	eval(eval_[1]);
 });
