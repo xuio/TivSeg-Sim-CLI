@@ -1,8 +1,6 @@
 'use strict';
 
 const Request = require('request');
-// require('request-debug')(Request);
-const FormData = require('form-data');
 const fs = require('fs');
 const path = require('path');
 const MultipartStream = require('multipart-stream');
@@ -15,13 +13,14 @@ const simulator = config.get('simulator');
 
 let sessionCookie = '';
 
+// request with curl, server returns incomplete headers
 const requestC = curl.request({
 //	baseUrl: simulator.baseurl,
+	useragent: browser.useragent,
 	headers: {
 		Origin: simulator.baseurl,
 		'Accept-Language': 'en-US,en;q=0.8,de-DE;q=0.6,de;q=0.4',
 		'Upgrade-Insecure-Requests': '1',
-		'User-Agent': browser.useragent,
 		Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
 		Referer: `${simulator.baseurl}/root`,
 		'Cache-Control': 'max-age=0',
@@ -53,14 +52,13 @@ function login() {
 			},
 			body: `kurs=${simulator.login.kurs}&passwort=${simulator.login.passwort}`
 		}, (error, response, body) => {
-			console.log(body);
 			if (error) {
 				reject(error);
 			} else {
-				sessionCookie = response.headers['set-cookie'][response.headers['set-cookie'].length - 1];
-				sessionCookie = sessionCookie.split(';');
-				sessionCookie = sessionCookie[0];
-				resolve();
+				let sessioncookie = response.headers['set-cookie'][response.headers['set-cookie'].length - 1];
+				sessioncookie = sessioncookie.split(';');
+				sessioncookie = sessioncookie[0];
+				resolve(sessioncookie);
 			}
 		});
 	});
@@ -87,8 +85,6 @@ function testHomepage() {
 	});
 }
 
-// "baseurl": "http://simplify.itiv.kit.edu/tivseg-sim",
-
 function uploadFile(filePath) {
 	return new Promise((resolve, reject) => {
 		const stream = new MultipartStream();
@@ -97,12 +93,13 @@ function uploadFile(filePath) {
 				'Content-Disposition': `form-data; name="userfile"; filename="${path.basename(filePath)}"`,
 				'Content-Type': 'application/octet-stream',
 			},
-			body: fs.createReadStream(filePath)// (`${__dirname}/Motor.cpp`)
+			body: fs.createReadStream(filePath)
 		});
 		let data;
-		MultipartStream.on('data', (d) => {
+		stream.on('data', (d) => {
 			data += d;
 		}).on('end', () => {
+			data = data.replace('undefined', '');
 			requestC({
 				url: `${simulator.baseurl}/uploadfile`,
 				method: 'POST',
@@ -111,59 +108,24 @@ function uploadFile(filePath) {
 					Accept: 'application/json, text/javascript, */*; q=0.01',
 					'X-Requested-With': 'XMLHttpRequest',
 					Connection: 'keep-alive',
-					Cookie: sessionCookie
+					Cookie: sessionCookie,
+					'Accept-Encoding': 'gzip, deflate',
 				},
-				body: data,
-			}, (error, response, body) => {
-				// console.log(response);
+				'data-binary': data,
+				compressed: 'true',
+			}, (error, body, meta) => {
+				// console.log('%s %s', meta.cmd, meta.args.join(' '));
 				if (error) {
-					console.error(error);
-					reject(Error(error));
-				} else {
+					reject(error);
+				}
+				body = JSON.parse(body);
+				console.log(body);
+				if ((body[error] != null)){
 					resolve(body);
+				} else {
+					reject(body[error]);
 				}
 			});
-		});
-	});
-}
-
-function check() {
-	return new Promise((resolve, reject) => {
-		request({
-			url: `${simulator.baseurl}/check?_=${Date.now()}`,
-			method: 'GET',
-			headers: {
-				Accept: 'text/plain, */*; q=0.01',
-				Cookie: sessionCookie
-			}
-		}, (error, response, body) => {
-			if (error) {
-				reject();
-			} else {
-				const obj = JSON.parse(body);
-				resolve(obj);
-			}
-		});
-	});
-}
-
-function currentStep() {
-	return new Promise((resolve, reject) => {
-		request({
-			url: `${simulator.baseurl}/current-step?_=${Date.now()}`,
-			method: 'GET',
-			headers: {
-				Accept: 'text/plain, */*; q=0.01',
-				Cookie: sessionCookie
-			}
-		}, (error, response, body) => {
-			if (error && (body.indexOf('bInvalid credentials. Your session may have expired.') !== -1)) {
-				reject();
-			} else {
-				console.log(body);
-				const obj = JSON.parse(body);
-				resolve(obj);
-			}
 		});
 	});
 }
@@ -184,15 +146,16 @@ function getFileMap() {
 				const toParse = body.split('<script type="text/javascript">')[0];
 				let json = html2json(toParse);
 				json = json.child[1].child[1].child[3].child[3].child[1].child;
-				const obj = []; // output object
+				const obj = {}; // output object
 				json.forEach((element) => {
 					if (element.hasOwnProperty('child')) {
 						element.child.forEach((elementChild) => {
 							if (elementChild.node === 'element' && elementChild.attr.class === 'files_hidden_id') {
-								obj.push({
+								/* obj.push({
 									file: elementChild.attr.id,
 									id: elementChild.attr.value,
-								});
+								});*/
+								obj[elementChild.attr.id] = parseInt(elementChild.attr.value, 10);
 							}
 						});
 					}
@@ -203,12 +166,11 @@ function getFileMap() {
 	});
 }
 
-// {check, projects,check,current-step,check,2,check,current-step,check,current-step,check,components,check,current-step,check,components-arch, check,current-step,check,current-step,check,current-step,check,applications,check,current-step}
-
-function poll(index, done) {
-	console.log(`${index}:${simulator.prepare[index]}`);
+function prepare(object, index, done) {
+	// console.log(`${index}:${simulator.prepare[index]}`);
+	process.stdout.write('.'); // console.log with no \n
 	requestC({
-		url: `${simulator.baseurl}/${simulator.prepare[index]}?_=${Date.now()}`,
+		url: `${simulator.baseurl}/${object[index]}?_=${Date.now()}`,
 		method: 'GET',
 		headers: {
 			Accept: 'text/plain, */*; q=0.01',
@@ -219,53 +181,77 @@ function poll(index, done) {
 			console.error(error);
 			return false;
 		}
-		if (index === (simulator.prepare.length - 1)) {
-			console.log('poll end');
+		if (index === (object.length - 1)) {
+			console.log('.');
 			return done();
 		}
-		return poll(index + 1, done);
+		return prepare(object, index + 1, done);
+	});
+}
+
+function moveFile(fileId, filename, tmpfile) {
+	console.log('move');
+	return new Promise((resolve, reject) => {
+		console.log('move');
+		const toMove = [];
+		toMove[0].fileId = fileId;
+		toMove[0].tmpfile = tmpfile;
+		toMove[0].name = filename;
+		request({
+			url: `${simulator.baseurl}/movefiles?_=${Date.now()}`,
+			method: 'POST',
+			headers: {
+				Accept: 'application/json, text/javascript, */*; q=0.01',
+				Cookie: sessionCookie
+			}
+		}, (error, response, body) => {
+			if (error) {
+				console.error(error);
+				reject(error);
+			}
+			console.log(body);
+			resolve();
+		});
+	});
+}
+
+// toMove[0][fileId]=941&toMove[0][tmpfile]=~tmp_96a57111a1af57da16784391fb6c62e0&toMove[0][name]=Motor.cpp
+// {"error":null,"files":[],"file":{"tmpfile":"~tmp_9f410c19d62be11029ef19ed1360f0b9","filename":"PWM.h"}}
+function uploadFiles(fileMap) {
+	uploadFile(`${__dirname}/Motor.cpp`)
+	.then((body) => {
+		console.log(body);
+		console.log('asdf');
+		return moveFile(fileMap[body.file.filename], body.file.filename, body.file.tmpfile);
+	}, (error) => {
+		console.log(error);
+	})
+	.then(() => {
+		process.stdout.write('preparing compiler');
+		prepare(simulator.prepare.compile, 0, () => {
+			console.log('done');
+		});
 	});
 }
 
 // do stuff
 login()
-.then(() => {
+.then((sessioncookie) => {
+	sessionCookie = sessioncookie;
 	console.log(`got session: ${sessionCookie}`);
 	return testHomepage();
-}, () => {
-	console.log('ERROR 1');
-	return false;
 })
 .then(() => {
 	console.log('login successful');
-	return currentStep();
-}, () => {
-	console.log('ERROR 2');
-	return false;
-})
-.then((obj) => {
-	console.log(obj);
-	return check();
-}, () => {
-	console.log('ERROR 3');
-	return false;
-})
-.then(() => {
-	console.log('starting prepare');
-	return poll(0, () => {
+	process.stdout.write('preparing simulator');
+	return prepare(simulator.prepare.upload, 0, () => {
 		getFileMap()
 		.then((obj) => {
 			console.log(obj);
+			uploadFiles(obj);
 		});
 	});
-}, () => {
-	console.log('ERROR 4');
-	return false;
-});
-/*	return uploadFile(`${__dirname}/Motor.cpp`);
 })
 .then((body) => {
 	console.log(body);
-});*/
-
-// {"error":null,"files":[],"file":{"tmpfile":"~tmp_9f410c19d62be11029ef19ed1360f0b9","filename":"PWM.h"}}
+});

@@ -5,8 +5,8 @@
 	"simulator":{
 		"baseurl": "http://simplify.itiv.kit.edu/tivseg-sim",
 		"login": {
-			"kurs": "Mi1400A02",
-			"passwort": "abc.123-de"
+			"kurs": "<snip>",
+			"passwort": "<snip>"
 		},
 		"prepare": [
 			"check",
