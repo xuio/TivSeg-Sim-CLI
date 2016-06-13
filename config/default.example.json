@@ -8,6 +8,13 @@
 			"kurs": "<snip>",
 			"passwort": "<snip>"
 		},
+		"filesToUpload":{
+			"basedir": "/Users/moritz/dev/projects/uni/IT/workshop",
+			"files": [
+				"Antrieb/Motor.h",
+				"Antrieb/Motor.cpp"
+			]
+		},
 		"prepare":{
 			"upload":[
 				"check",
@@ -32,7 +39,10 @@
 				"current-step",
 				"check",
 				"current-step",
-				"check"
+				"check",
+				"cleanupfiles",
+				"check",
+				"current-step"
 			],
 			"compile": [
 				"check",
@@ -40,11 +50,21 @@
 				"check",
 				"loadcompilation",
 				"check",
+				"current-step",
+				"check"
+			],
+			"simulate": [
+				"check",
+				"current-step",
+				"check",
+				"loadsimulation",
+				"check",
+				"simulation_outputFramePre"
+			],
+			"compare": [
+				"check",
 				"current-step"
 			]
 		}
-	},
-	"code": {
-		"basepath": "/Users/moritz/dev/projects/uni/IT/workshop/"
 	}
 }

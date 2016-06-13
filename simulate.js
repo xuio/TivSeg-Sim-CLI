@@ -7,8 +7,11 @@ const MultipartStream = require('multipart-stream');
 const config = require('config');
 const html2json = require('html2json').html2json;
 const curl = require('curlrequest');
+const colors = require('colors');
+const Spinner = require('cli-spinner').Spinner;
+const argv = require('optimist').argv;
 
-// require('request-debug')(Request);
+let spinner = null;
 
 const browser = config.get('browser');
 const simulator = config.get('simulator');
@@ -254,25 +257,119 @@ function compile() {
 				console.error(error);
 				reject(error);
 			} else {
+				//parse result
 				body = html2json(body);
-				let out = [];
+
+				const out = [];
+
 				body.child.forEach((child) => {
 					if (child.tag === 'script') {
 						out.push(child.child);
 					}
 				});
-				const out1 = [];
-				out1.push(out[2][0].text);
-				out1.push(out[3][0].text);
-				return resolve(out1);
+
+				const result = {
+					stdout: out[2][0].text.split('console.log("')[1].split('");')[0].replace(/\\n/g, '\n').replace(/\\/g, ''),
+					stderr: out[3][0].text.split('console.log("')[1].split('");')[0].replace(/\\n/g, '\n').replace(/\\/g, ''),
+				};
+
+				if (result.stderr) {
+					reject(result);
+				} else {
+					resolve(result);
+				}
 			}
 		});
 	});
 }
 
-// fileId, filename, tmpfile -> fileMap[body.file.filename], body.file.filename, body.file.tmpfile
-// toMove[0][fileId]=941&toMove[0][tmpfile]=~tmp_96a57111a1af57da16784391fb6c62e0&toMove[0][name]=Motor.cpp
-// {"error":null,"files":[],"file":{"tmpfile":"~tmp_9f410c19d62be11029ef19ed1360f0b9","filename":"PWM.h"}}
+function simulate(mode) {
+	return new Promise((resolve, reject) => {
+		requestC({
+			url: `${simulator.baseurl}/simulate?instructions=1000000&slice=100&fileprefix=Fahrt&_=${Date.now()}`,
+			method: 'GET',
+			headers: {
+				Accept: 'application/json, text/javascript, */*; q=0.01',
+				'X-Requested-With': 'XMLHttpRequest',
+				Connection: 'keep-alive',
+				Cookie: sessionCookie,
+				'Accept-Encoding': 'gzip, deflate',
+			},
+			compressed: 'true',
+		}, (error, body) => {
+			// fucken strange curl error suppression....... \wtf
+			if (error && error !== "Couldn't resolve host. The given remote host was not resolved.") {
+				console.error(error);
+				reject(error);
+			} else {
+				body = JSON.parse(body);
+				if (body.success) {
+					body = body.output.replace(/\\n/g, '\n').replace(/\\/g, '');
+					resolve(body);
+				} else {
+					reject('simulation error');
+				}
+			}
+		});
+	});
+}
+
+// "simulation_outputFramePost"
+
+function getCompare() {
+	return new Promise((resolve, reject) => {
+		requestC({
+			url: `${simulator.baseurl}/simulation_outputFramePost?_=${Date.now()}`,
+			method: 'GET',
+			headers: {
+				Accept: 'application/json, text/javascript, */*; q=0.01',
+				'X-Requested-With': 'XMLHttpRequest',
+				Connection: 'keep-alive',
+				Cookie: sessionCookie,
+				'Accept-Encoding': 'gzip, deflate',
+			},
+			compressed: 'true',
+		}, (error, body) => {
+			// fucken strange curl error suppression....... \wtf
+			if (error && error !== "Couldn't resolve host. The given remote host was not resolved.") {
+				console.error(error);
+				reject(error);
+			} else {
+				body = html2json(body);
+				const out = {};
+				console.log(JSON.stringify(body));
+				// out.pwm = body.child[1].child[1].child[1].child[0].attr.href;
+				// out.gpio = body.child[3].child[1].child[1].child[0].attr.href;
+				resolve(out);
+			}
+		});
+	});
+}
+
+function compare(url) {
+	return new Promise((resolve, reject) => {
+		requestC({
+			'url': url,
+			method: 'GET',
+			headers: {
+				Accept: 'application/json, text/javascript, */*; q=0.01',
+				'X-Requested-With': 'XMLHttpRequest',
+				Connection: 'keep-alive',
+				Cookie: sessionCookie,
+				'Accept-Encoding': 'gzip, deflate',
+			},
+			compressed: 'true',
+		}, (error, body) => {
+			// fucken strange curl error suppression....... \wtf
+			if (error && error !== "Couldn't resolve host. The given remote host was not resolved.") {
+				console.error(error);
+				reject(error);
+			} else {
+				resolve(body);
+			}
+		});
+	});
+}
 
 /* magic starts here */
 // login with credentials from config file
@@ -323,9 +420,10 @@ login()
 		// check if file is allowed / has destination ID
 		if (fileMap.hasOwnProperty(file.name)) {
 			promises.push(uploadFile(file));
+		} else {
+			console.error(`file '${file.name}' is not allowed`.red);
 		}
 	});
-	// console.log(promises);
 	// upload all files, then resolve
 	return Promise.all(promises);
 })
@@ -365,10 +463,99 @@ login()
 	return Promise.all(promises);
 })
 .then(() => {
-	console.log('\ncompiling');
+	console.log('');
+	spinner = new Spinner('compiling %s');
+	spinner.setSpinnerString('|/-\\');
+	spinner.start();
 	return compile();
 })
-.then((eval_) => {
-	eval(eval_[0]);
-	eval(eval_[1]);
+.then((result) => {
+	spinner.stop();
+	console.log('\ncompiliation successful!'.green);
+	if (argv.v) {
+		console.log('\nSTDOUT:');
+		console.log(result.stdout);
+	}
+	process.stdout.write('preparing simulation');
+
+	// create array of promises we need
+	const promises = [];
+
+	// add promise for each prepare compile url
+	simulator.prepare.simulate.forEach((url) => {
+		promises.push(prepare(url));
+	});
+
+	// resolve all promises before continuing
+	return Promise.all(promises);
+}, (result) => {
+	spinner.stop();
+	console.error('\ncompiliation failed!'.red);
+	if (argv.v) {
+		console.log('\nSTDOUT:');
+		console.log(result.stdout);
+	}
+	console.error(unescape(result.stderr));
+})
+.then(() => {
+	console.log('');
+	spinner = new Spinner('simulating %s');
+	spinner.setSpinnerString('|/-\\');
+	spinner.start();
+	return simulate(!argv.steady);
+})
+.then((result) => {
+	spinner.stop();
+	console.log('\n\n----------simulation output----------'.yellow);
+	const pieces = result.split('\n');
+	const output = [];
+	for (let i = 0; i < pieces.length; i++) {
+		if (output.indexOf(pieces[i]) < 0) {
+			output.push(pieces[i]);
+		}
+	}
+	console.log(output.join('\n'));
+	console.log('\n\n----------------done----------------'.green);
+
+	// console.log(result);
+	/*process.stdout.write('\n\npreparing compare');
+	// create array of promises we need
+	const promises = [];
+
+	// add promise for each prepare compile url
+	simulator.prepare.compare.forEach((url) => {
+		promises.push(prepare(url));
+	});
+
+	// resolve all promises before continuing
+	return Promise.all(promises);*/
+}, (error) => {
+	spinner.stop();
+	console.error(error.red);
 });
+/* .then(() => {
+	return getCompare();
+})
+.then((out) => {
+	// create array of promises we need
+	const promises = [compare(out.pwm), compare(out.gpio)];
+
+	// resolve all promises before continuing
+	return Promise.all(promises);
+})
+.then((result) => {
+	const pieces = [result[0].split('\n'), result[1].split('\n')];
+	const output = [];
+	for (let j = 0; j < 2; j++) {
+		for (let i = 0; i < pieces.length; i++) {
+			if (output.indexOf(pieces[j][i]) < 0) {
+				output[j].push(pieces[i]);
+			}
+		}
+		output[j] = output[j].join('\n');
+	}
+	console.log('\n=> PWM compare:\n'.yellow);
+	console.log(output[0]);
+	console.log('\n=> GPIO compare:\n'.yellow);
+	console.log(output[1]);
+});*/
