@@ -286,7 +286,7 @@ function compile() {
 function simulate(mode) {
 	return new Promise((resolve, reject) => {
 		requestC({
-			url: `${simulator.baseurl}/simulate?instructions=1000000&slice=100&fileprefix=${mode ? Fahrt : aufgebockt}&_=${Date.now()}`,
+			url: `${simulator.baseurl}/simulate?instructions=1000000&slice=100&fileprefix=${mode ? 'Fahrt' : 'aufgebockt'}&_=${Date.now()}`,
 			method: 'GET',
 			headers: {
 				Accept: 'application/json, text/javascript, */*; q=0.01',
@@ -586,7 +586,7 @@ help()
 			console.log(output[i]);
 		}
 	});
-	console.log('\n\n----------------done----------------'.green);
+	console.log('\n----------------done----------------\n'.green);
 }, (error) => {
 	error.forEach((err) => {
 		console.error(err);
