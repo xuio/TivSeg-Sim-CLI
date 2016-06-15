@@ -286,7 +286,7 @@ function compile() {
 function simulate(mode) {
 	return new Promise((resolve, reject) => {
 		requestC({
-			url: `${simulator.baseurl}/simulate?instructions=1000000&slice=100&fileprefix=Fahrt&_=${Date.now()}`,
+			url: `${simulator.baseurl}/simulate?instructions=1000000&slice=100&fileprefix=${mode ? Fahrt : aufgebockt}&_=${Date.now()}`,
 			method: 'GET',
 			headers: {
 				Accept: 'application/json, text/javascript, */*; q=0.01',
@@ -314,8 +314,6 @@ function simulate(mode) {
 	});
 }
 
-// "simulation_outputFramePost"
-
 function getCompare() {
 	return new Promise((resolve, reject) => {
 		requestC({
@@ -335,37 +333,50 @@ function getCompare() {
 				console.error(error);
 				reject(error);
 			} else {
-				body = html2json(body);
-				const out = {};
-				console.log(JSON.stringify(body));
-				// out.pwm = body.child[1].child[1].child[1].child[0].attr.href;
-				// out.gpio = body.child[3].child[1].child[1].child[0].attr.href;
-				resolve(out);
+				const out = [];
+				if ((body.indexOf('/outputs/output_cmp_pwm.txt') > -1) || (body.indexOf('/outputs/output_cmp_gpio.txt') > -1)) {
+					const parsedBody = html2json(body);
+					if ((body.indexOf('/outputs/output_cmp_pwm.txt') > -1)) {
+						out.push({
+							type: 'PWM',
+							href: parsedBody.child[1].child[1].child[1].child[1].child[0].attr.href,
+						});
+					}
+					if ((body.indexOf('/outputs/output_cmp_gpio.txt') > -1)) {
+						out.push({
+							type: 'GPIO',
+							href: parsedBody.child[1].child[1].child[1].child[3].child[0].attr.href,
+						});
+					}
+					resolve(out);
+				} else {
+					reject();
+				}
 			}
 		});
 	});
 }
 
-function compare(url) {
+function compare(url_) {
 	return new Promise((resolve, reject) => {
-		requestC({
-			'url': url,
+		request({
+			url: `${url_.href}?_=${Date.now()}`,
 			method: 'GET',
+			gzip: true,
 			headers: {
-				Accept: 'application/json, text/javascript, */*; q=0.01',
+				Accept: 'text/plain, */*; q=0.01',
 				'X-Requested-With': 'XMLHttpRequest',
-				Connection: 'keep-alive',
-				Cookie: sessionCookie,
-				'Accept-Encoding': 'gzip, deflate',
-			},
-			compressed: 'true',
-		}, (error, body) => {
-			// fucken strange curl error suppression....... \wtf
-			if (error && error !== "Couldn't resolve host. The given remote host was not resolved.") {
+				Cookie: sessionCookie
+			}
+		}, (error, response, body) => {
+			if (error) {
 				console.error(error);
 				reject(error);
 			} else {
-				resolve(body);
+				resolve({
+					'body': body,
+					'type': url_.type
+				});
 			}
 		});
 	});
@@ -373,7 +384,29 @@ function compare(url) {
 
 /* magic starts here */
 // login with credentials from config file
-login()
+
+function help() {
+	return new Promise((resolve, reject) => {
+		if (argv.h || argv.help) {
+			reject();
+		} else {
+			resolve();
+		}
+	});
+}
+help()
+.then(() => {
+	return login();
+}, () => {
+	console.log('TivSegSim CLI 0.0.1 June 2016 by Moritz Hoffmann'.yellow);
+	console.log('');
+	console.log('Usage:');
+	console.log('  -v: verbose output');
+	console.log('  -s: steady simulation "aufgebockt"');
+	console.log('  -h: display this message'.blue);
+	console.log('');
+	process.exit();
+})
 .then((sessioncookie) => {
 	// got session cookie, log it to the console
 	sessionCookie = sessioncookie;
@@ -515,47 +548,47 @@ login()
 		}
 	}
 	console.log(output.join('\n'));
-	console.log('\n\n----------------done----------------'.green);
-
-	// console.log(result);
-	/*process.stdout.write('\n\npreparing compare');
-	// create array of promises we need
-	const promises = [];
-
-	// add promise for each prepare compile url
-	simulator.prepare.compare.forEach((url) => {
-		promises.push(prepare(url));
-	});
-
-	// resolve all promises before continuing
-	return Promise.all(promises);*/
 }, (error) => {
 	spinner.stop();
 	console.error(error.red);
-});
-/* .then(() => {
+})
+.then(() => {
 	return getCompare();
 })
 .then((out) => {
-	// create array of promises we need
-	const promises = [compare(out.pwm), compare(out.gpio)];
+	const promises = [];
+	out.forEach((compareFile) => {
+		promises.push(compare(compareFile));
+	});
 
 	// resolve all promises before continuing
 	return Promise.all(promises);
+}, () => {
+	console.error('=> no compare files generated'.red);
+	console.log('\n\n----------------done----------------'.green);
 })
 .then((result) => {
-	const pieces = [result[0].split('\n'), result[1].split('\n')];
-	const output = [];
-	for (let j = 0; j < 2; j++) {
+	console.log('\n\n-----------compare output-----------'.yellow);
+	result.forEach((out) => {
+		console.log(`\n=> ${out.type} compare:\n`.yellow);
+		const pieces = out.body.split('\n');
+		const output = [];
 		for (let i = 0; i < pieces.length; i++) {
-			if (output.indexOf(pieces[j][i]) < 0) {
-				output[j].push(pieces[i]);
+			if (output.indexOf(pieces[i]) < 0) {
+				output.push(pieces[i]);
 			}
 		}
-		output[j] = output[j].join('\n');
-	}
-	console.log('\n=> PWM compare:\n'.yellow);
-	console.log(output[0]);
-	console.log('\n=> GPIO compare:\n'.yellow);
-	console.log(output[1]);
-});*/
+		for (let i = 0; i < output.length; i++) {
+			if ((i > 50) && !argv.v) {
+				console.log('\n[...] some lines were clipped, use -v to display everything'.yellow);
+				break;
+			}
+			console.log(output[i]);
+		}
+	});
+	console.log('\n\n----------------done----------------'.green);
+}, (error) => {
+	error.forEach((err) => {
+		console.error(err);
+	});
+});
