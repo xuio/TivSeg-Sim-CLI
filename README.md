@@ -19,10 +19,4 @@ this package provides a less cancerous interface to TivSeg-sim
 ### Usage
 * `node simulator.js`
 * verbose output: `node simulator.js -v`
-* steady simulation "aufgebockt": `node simulator.js --steady`
-
-
----
-
-
-###### _Tod Dem KIT EI Board_
+* steady simulation "aufgebockt": `node simulator.js -s`
