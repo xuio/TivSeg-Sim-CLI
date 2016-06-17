@@ -415,7 +415,7 @@ help()
 	return testHomepage();
 })
 .then(() => {
-	console.log('login successful');
+	console.log('login successful'.green);
 	process.stdout.write('preparing simulator');
 
 	// create array of promises we need
@@ -429,7 +429,8 @@ help()
 	// resolve all promises before continuing
 	return Promise.all(promises);
 }, () => {
-	console.error('login failed!');
+	console.error('login failed!'.red);
+	process.exit();
 })
 .then(() => { // wtf eslint
 	console.log('\ngetting file map');
@@ -473,15 +474,15 @@ help()
 	});
 	return moveFile(toMove);
 }, (error) => {
-	console.error(`move error: ${error}`);
+	console.error(`move error: ${error}`.red);
 })
 .then(() => {
-	console.log('upload finished');
+	console.log('upload finished'.green);
 }, (error) => {
 	console.error(error);
 })
 .then(() => {
-	console.log('files moved successfully');
+	console.log('files moved successfully'.green);
 	process.stdout.write('preparing compiler');
 
 	// create array of promises we need
@@ -525,10 +526,12 @@ help()
 	spinner.stop();
 	console.error('\ncompiliation failed!'.red);
 	if (argv.v) {
-		console.log('\nSTDOUT:');
+		console.log('\n=> STDOUT:\n'.yellow);
 		console.log(result.stdout);
 	}
-	console.error(unescape(result.stderr));
+	console.log('\n=> STDERR:\n'.yellow);
+	console.error(result.stderr);
+	process.exit();
 })
 .then(() => {
 	console.log('');
@@ -551,6 +554,7 @@ help()
 }, (error) => {
 	spinner.stop();
 	console.error(error.red);
+	process.exit();
 })
 .then(() => {
 	return getCompare();
@@ -566,6 +570,7 @@ help()
 }, () => {
 	console.error('=> no compare files generated'.red);
 	console.log('\n\n----------------done----------------'.green);
+	process.exit();
 })
 .then((result) => {
 	console.log('\n\n-----------compare output-----------'.yellow);
@@ -587,8 +592,10 @@ help()
 		}
 	});
 	console.log('\n----------------done----------------\n'.green);
+	process.exit();
 }, (error) => {
 	error.forEach((err) => {
-		console.error(err);
+		console.error(err.red);
 	});
+	process.exit();
 });
